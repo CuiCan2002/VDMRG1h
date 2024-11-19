@@ -22,6 +22,7 @@ main(int argc, char* argv[])
     int holespin = input.getInt("holespin");int measurenum = input.getInt("measurenum");int sigmatj = input.getInt("sigmatj");
     int Phasestring = input.getInt("Phasestring");
     int Ifsym = input.getInt("Ifsym"); int IfHt = input.getInt("IfHt"); int IfHJ = input.getInt("IfHJ"); int IfA = input.getInt("IfA");
+    int IfZi = input.getInt("IfZi");
 
     if((Ifphi0==1)&&(Ifbasis==1)) std::abort();
 
@@ -117,7 +118,7 @@ main(int argc, char* argv[])
     if (Phasestring==1) PST_t.push_back("+");
     if (Phasestring==-1) PST_t.push_back("-");
     if (Phasestring==0) PST_t.push_back("0");
-    Measure measure_halffilling(t,J,Nx,Ny,holespin,measurenum,sigmatj,PST_t,PST_t.size(),Ifbasis,Ifsym,IfHt,IfHJ,IfA);
+    Measure measure_halffilling(t,J,Nx,Ny,holespin,measurenum,sigmatj,PST_t,PST_t.size(),Ifbasis,Ifsym,IfHt,IfHJ,IfA,IfZi);
     std::time(&timegenerate);
     std::time_t elapsedgenerate = timegenerate - start_time;
     std::printf("\ntimegenerate = %lds",elapsedgenerate);

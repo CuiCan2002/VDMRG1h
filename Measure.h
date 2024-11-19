@@ -19,17 +19,20 @@ class Measure
     std::vector<std::string> PST_t;
     int pssize;
     int Ifbasis,Ifsym;
-    int IfHt,IfHJ,IfA;
-    std::vector<int> irowHt, icolHt, irowHJ, icolHJ, irowA, icolA;
-    std::vector<std::complex<double>> valHt,valHJ, valA;
+    int IfHt,IfHJ,IfA, IfZi;
+    std::vector<int> irowHt, icolHt, irowHJ, icolHJ, irowA, icolA , irowZi , icolZi;
+    std::vector<std::complex<double>> valHt,valHJ, valA, valZi;
     std::vector<double> theta_ij;
     std::vector<itensor::MPS> ctilde_array_psl;
+    MPS phi0;
+    tJ sitesnew; //the sites of phi0 with QN
+    tJ sitesold; //the sites of basis without QN
 
     public:
     
-    Measure(double t_,double J_,int Nx_, int Ny_, int holespin_,int measuredim_,int sigmatj_,std::vector<std::string> PST_t_,int pssize_,int Ifbasis_,int Ifsym_,int IfHt_,int IfHJ_, int IfA_)
+    Measure(double t_,double J_,int Nx_, int Ny_, int holespin_,int measuredim_,int sigmatj_,std::vector<std::string> PST_t_,int pssize_,int Ifbasis_,int Ifsym_,int IfHt_,int IfHJ_, int IfA_, int IfZi_)
       : t(t_), J(J_),Nx(Nx_), Ny(Ny_), holespin(holespin_), measuredim(measuredim_),sigmatj(sigmatj_),PST_t(PST_t_),pssize(pssize_),
-      Ifbasis(Ifbasis_),Ifsym(Ifsym_),IfHt(IfHt_),IfHJ(IfHJ_),IfA(IfA_)
+      Ifbasis(Ifbasis_),Ifsym(Ifsym_),IfHt(IfHt_),IfHJ(IfHJ_),IfA(IfA_), IfZi(IfZi_)
         {  
             generate_theta();
             if(Ifbasis==1) load_basis();
@@ -56,11 +59,13 @@ class Measure
 
     void measureHJ();
 
+    void measureZi();
+
     unsigned sym_ope(unsigned h, unsigned sym_index);
 
     bool Isconj(unsigned sym_index);
 
-    std::complex<double> sym_phase(unsigned m, unsigned n, unsigned sym_index, unsigned hs);
+    std::complex<double> sym_phase(int m, int n, unsigned sym_index, unsigned hs);
 
     void coutbasis();
 
@@ -104,55 +109,69 @@ class Measure
     void Measure::ctilde(int site_i, int pssign, const itensor::MPS& phi, itensor::MPS& psi) {
         auto N = Nx * Ny;
         auto lattice = squareLattice(Nx,Ny);
-        tJ sites;
-        readFromFile("sites_file",sites);
         psi = phi;
-        //psi.position(site_i);
+        
+        if(pssign != 0){
         for(int j = 1; j <= N; j++)
         {
             if(j==site_i) continue;
+            psi.position(j);
             double theta = 0.0;
             theta = pssign * get_theta(site_i, j);
-            auto ampo = AutoMPO(sites);
-            ampo += std::complex<double>(std::cos(theta) - 1, std::sin(theta)), "Ndn", j;
-            ampo += 1, "Id", j;
-            auto psop = toMPO(ampo);
-            psi = applyMPO(psop,psi,{"Method=","DensityMatrix","MaxDim=",measuredim,"Cutoff=",1E-10});
-            psi.noPrime();
+            auto psop = std::complex<double>(std::cos(theta) - 1, std::sin(theta))*op(sitesold,"Ndn",j);
+            psop += op(sitesold,"Id",j);
+            auto newpsi = psop * psi(j);
+            newpsi.noPrime();
+            psi.set(j,newpsi);
+        }
         }
         psi = removeQNs(psi);
-        tJ sitesnew = siteInds(psi);
-        auto ampoc = AutoMPO(sitesnew);
-        if (holespin == 0)
-            ampoc += 1,"Cup", site_i; 
-        else
-            ampoc += 1,"Cdn", site_i;
-        auto barec = toMPO(ampoc);
-        psi = applyMPO(barec,psi,{"Method=","DensityMatrix","MaxDim=",measuredim,"Cutoff=",1E-10}); 
-        psi.noPrime();
-        if( site_i % 2 == 1 )  psi *=  (-1); 
-        std::cout<<"finish"<<site_i<<std::endl; 
+        psi.position(site_i);
+
+        if (site_i==1) sitesnew = siteInds(psi);
+        auto ania = op(sitesnew,"Aup",site_i);
+        if(holespin == 1) ania = op(sitesnew,"Adn",site_i);
+        auto newpsi = ania * psi(site_i);
+        newpsi.noPrime();
+        psi.set(site_i,newpsi);            
+
+        for (int i = site_i - 1 + holespin; i >=1;i--)
+        {
+            psi.position(i);
+            auto jordan = op(sitesnew,"F",i);
+            auto newpsi = jordan * psi(i);
+            newpsi.noPrime();
+            psi.set(i,newpsi);   
+        }
+
+        std::cout<<"finish"<<site_i<<std::endl;
+
     }
 
     void Measure::generate_basis()
     {
-        tJ sites;
-        readFromFile("sites_file",sites);
-        MPS phi(sites);
-        readFromFile("psi_file",phi);
+        readFromFile("sites_file",sitesold);
+        MPS phi0temp(sitesold);
+        readFromFile("psi_file",phi0temp);
+        phi0 = phi0temp;
         int N = Nx * Ny;
-        for (int psl = 0; psl < pssize; psl ++){
-            for (int i = 1; i <= N ; i++)
+        for (int i = 1; i <= N ; i++)
+        {
+            for (int psl = 0; psl < pssize; psl ++)
             {
-                MPS psil(sites);
-                ctilde(i,get_pssign(PST_t[psl],0),phi,psil);
-                ctilde_array_psl.push_back(psil);
+            MPS psil(sitesold);
+            ctilde(i,get_pssign(PST_t[psl],0),phi0,psil);
+            ctilde_array_psl.push_back(psil);
             }
         }
     }
 
     void Measure::load_basis()
     {
+        readFromFile("sites_file",sitesold);
+        MPS phi0temp(sitesold);
+        readFromFile("psi_file",phi0temp);
+        phi0 = phi0temp;
         auto f = h5_open("basis.h5",'r');
         std::string basisname = "basis";
         for (int i = 0; i< Nx*Ny ;i++)
@@ -162,6 +181,7 @@ class Measure
             ctilde_array_psl.push_back(psil);
         }
         close(f);
+        sitesnew = siteInds(ctilde_array_psl[0]);
         std::cout<<"success_load"<<std::endl;
     }
 
@@ -169,14 +189,13 @@ class Measure
     {
         if(IfA == 1) measureAred();
         if(IfHt == 1) measureHt();
-        if(IfHJ == 1) measureHJ(); 
+        if(IfHJ == 1) measureHJ();
+        if(IfZi == 1) measureZi(); 
     }
 
     void Measure::measureAred()
     {
         auto N = Nx * Ny;
-        //auto fi = h5_open("halffilling_4_4.h5",'r');
-        //auto phi = h5_read<MPS>(fi,"RVB");
         int sym_num = (Nx == Ny)? (7):(3);
         if (Ifsym==0) sym_num = 0 ;       
         for (int psr = 0; psr < pssize; psr++){
@@ -191,9 +210,11 @@ class Measure
                     for (int j = i; j <= N; j++)
                     {
                         if ((label_visited[i-1][j-1])||(label_visited[j-1][i-1])) continue;
-                        std::complex<double> Avalue = innerC(ctilde_array_psl[i-1],ctilde_array_psl[j-1]);
+                        std::complex<double> Avalue = innerC(ctilde_array_psl[(i-1)*pssize+psl],ctilde_array_psl[(j-1)*pssize+psr]);
+                        if(std::abs(Avalue)<1e-15) Avalue=0;
                         for (int sym_index = 0; sym_index < sym_num + 1; sym_index++){
                             int S_i=sym_ope(i,sym_index),S_j=sym_ope(j,sym_index);
+                            if ((label_visited[S_i-1][S_j-1])||(label_visited[S_j-1][S_i-1])) continue;
                             int Iscon = Isconj(sym_index);
                             if(S_i==S_j)
                             {
@@ -204,7 +225,7 @@ class Measure
                             {
                                 irowA.push_back(S_i * pssize + psl); icolA.push_back(S_j * pssize + psr);
                                 std::complex<double> Avaluesym =(Iscon)?(std::conj(Avalue)):(Avalue);
-                                Avaluesym = Avaluesym * sym_phase(psl, psr, sym_index, holespin);
+                                Avaluesym = Avaluesym * sym_phase(get_pssign(PST_t[psl], 0), get_pssign(PST_t[psr], 0), sym_index, holespin);
                                 valA.push_back(Avaluesym);
                                 irowA.push_back(S_j * pssize + psr);icolA.push_back(S_i * pssize + psl);
                                 valA.push_back(std::conj(Avaluesym));
@@ -221,14 +242,10 @@ class Measure
     void Measure::measureHt()
     {
         auto N = Nx * Ny;
-        //auto fi = h5_open("halffilling_4_4.h5",'r');
-        //auto phi = h5_read<MPS>(fi,"RVB");
         auto lattice = squareLattice(Nx,Ny);
         int sym_num = (Nx == Ny)? (7):(3);
         if (Ifsym==0) sym_num = 0 ; 
-        tJ sites;
-        sites = siteInds(ctilde_array_psl[0]);
-        auto ampo = AutoMPO(sites);    
+        auto ampo = AutoMPO(sitesnew);    
         for(auto bnd : lattice)
         {
             ampo += -t,"Cdagup",bnd.s1,"Cup",bnd.s2;
@@ -249,10 +266,11 @@ class Measure
                     for (int j = i; j <= N; j++)
                     {
                         if ((label_visited[i-1][j-1])||(label_visited[j-1][i-1])) continue;
-                        std::complex<double> Htvalue = innerC(ctilde_array_psl[i-1],Ht,ctilde_array_psl[j-1]);
+                        std::complex<double> Htvalue = innerC(ctilde_array_psl[(i-1)*pssize+psl],Ht,ctilde_array_psl[(j-1)*pssize+psr]);
                         if(std::abs(Htvalue)<1e-15) Htvalue=0;
                         for (int sym_index = 0; sym_index < sym_num + 1; sym_index++){
                             int S_i=sym_ope(i,sym_index),S_j=sym_ope(j,sym_index);
+                            if ((label_visited[S_i-1][S_j-1])||(label_visited[S_j-1][S_i-1])) continue;
                             int Iscon = Isconj(sym_index);
                             if(S_i==S_j)
                             {
@@ -263,7 +281,7 @@ class Measure
                             {
                                 irowHt.push_back(S_i * pssize + psl); icolHt.push_back(S_j * pssize + psr);
                                 std::complex<double> Htvaluesym =(Iscon)?(std::conj(Htvalue)):(Htvalue);
-                                Htvaluesym = Htvaluesym * sym_phase(psl, psr, sym_index, holespin);
+                                Htvaluesym = Htvaluesym * sym_phase(get_pssign(PST_t[psl], 0), get_pssign(PST_t[psr], 0), sym_index, holespin);
                                 valHt.push_back(Htvaluesym);
                                 irowHt.push_back(S_j * pssize + psr);icolHt.push_back(S_i * pssize + psl);
                                 valHt.push_back(std::conj(Htvaluesym));
@@ -280,14 +298,10 @@ class Measure
     void Measure::measureHJ()
     {
         auto N = Nx * Ny;
-        //auto fi = h5_open("halffilling_4_4.h5",'r');
-        //auto phi = h5_read<MPS>(fi,"RVB");
         int sym_num = (Nx == Ny)? (7):(3);
         if (Ifsym==0) sym_num = 0 ;
         auto lattice = squareLattice(Nx,Ny);
-        tJ sites;
-        sites = siteInds(ctilde_array_psl[0]);
-        auto ampo = AutoMPO(sites);        
+        auto ampo = AutoMPO(sitesnew);        
         for(auto bnd : lattice)
         {
             ampo +=  0.5*J,"S+",bnd.s1,"S-",bnd.s2;
@@ -308,9 +322,11 @@ class Measure
                     for (int j = i; j <= N; j++)
                     {
                         if ((label_visited[i-1][j-1])||(label_visited[j-1][i-1])) continue;
-                        std::complex<double> HJvalue = innerC(ctilde_array_psl[i-1],HJ,ctilde_array_psl[j-1]);
+                        std::complex<double> HJvalue = innerC(ctilde_array_psl[(i-1)*pssize+psl],HJ,ctilde_array_psl[(j-1)*pssize+psr]);
+                        if(std::abs(HJvalue)<1e-15) HJvalue=0;
                         for (int sym_index = 0; sym_index < sym_num + 1; sym_index++){
                             int S_i=sym_ope(i,sym_index),S_j=sym_ope(j,sym_index);
+                            if ((label_visited[S_i-1][S_j-1])||(label_visited[S_j-1][S_i-1])) continue;
                             int Iscon = Isconj(sym_index);
                             if(S_i==S_j)
                             {
@@ -321,7 +337,7 @@ class Measure
                             {
                                 irowHJ.push_back(S_i * pssize + psl); icolHJ.push_back(S_j * pssize + psr);
                                 std::complex<double> HJvaluesym =(Iscon)?(std::conj(HJvalue)):(HJvalue);
-                                HJvaluesym = HJvaluesym * sym_phase(psl, psr, sym_index, holespin);
+                                HJvaluesym = HJvaluesym * sym_phase(get_pssign(PST_t[psl], 0), get_pssign(PST_t[psr], 0), sym_index, holespin);
                                 valHJ.push_back(HJvaluesym);
                                 irowHJ.push_back(S_j * pssize + psr);icolHJ.push_back(S_i * pssize + psl);
                                 valHJ.push_back(std::conj(HJvaluesym));
@@ -333,6 +349,63 @@ class Measure
                 }
             }
         }
+    }
+
+    void Measure::measureZi()
+    {
+        auto N = Nx * Ny;
+        int sym_num = (Nx == Ny)? (7):(3);
+        if (Ifsym==0) sym_num = 0 ;
+        std::vector<std::string> PST_Zi;
+        PST_Zi.push_back("0");
+        std::vector<itensor::MPS> barec_array;
+        for (int i = 1; i <= N ; i++)
+        {
+            for (int psl = 0; psl < (int)PST_Zi.size(); psl ++)
+            {
+            MPS psil(sitesold);
+            ctilde(i,get_pssign(PST_Zi[psl],0),phi0,psil);
+            barec_array.push_back(psil);
+            }
+        }
+
+        for (int psl = 0; psl < (int)PST_Zi.size(); psl++){
+        for (int psr = 0 ;psr < pssize; psr++){
+
+            std::vector<std::vector<bool>> label_visited(N,std::vector<bool>(N));
+            for (int j = 0; j < N;j++)
+                for(int i = 0; i < N; i++)
+                    label_visited[i][j] = 0;
+
+            for (int i = 1; i <= N; i++)
+            {
+                //site_i % 2 == 1
+                auto ampo = AutoMPO(sitesnew);
+                if (holespin == 0)
+                ampo += 1,"Cdagup", i; 
+                else
+                ampo += 1,"Cdagdn", i;
+                auto cdagger = toMPO(ampo);
+                
+                for (int j = 1; j <= N; j++)
+                {   
+                    if (label_visited[i-1][j-1]) continue;
+                    std::complex<double> Zivalue = innerC(barec_array[(i-1)*(int)PST_Zi.size()+psl],ctilde_array_psl[(j-1)*pssize+psr]);
+                    if(std::abs(Zivalue)<1e-15) Zivalue=0;    
+                    for (int sym_index = 0; sym_index < sym_num + 1; sym_index++){
+                        int S_i=sym_ope(i,sym_index),S_j=sym_ope(j,sym_index);
+                        if (label_visited[S_i-1][S_j-1]) continue;
+                        int Iscon = Isconj(sym_index);
+                        std::complex<double> Zivaluesym =(Iscon)?(std::conj(Zivalue)):(Zivalue);
+                        Zivaluesym = Zivaluesym * sym_phase(get_pssign(PST_Zi[psl], 0), get_pssign(PST_t[psr], 0), sym_index, holespin);
+                        irowZi.push_back(S_i * (int)PST_Zi.size() + psl); icolZi.push_back(S_j * pssize + psr);
+                        valZi.push_back(Zivaluesym);
+                        label_visited[S_i-1][S_j-1] = 1;                        
+                    }
+                }
+            }
+        } 
+        }  
     }
 
     //sym_index: 0 I; 1 Px; 2 Py; 3 Parity; 4 C41; 5 C43; 6 Pxy; 7 Pyx;  Px means two points are symmetric along y axis.
@@ -385,12 +458,13 @@ class Measure
     }    
 
     //sym_index: 0 I; 1 Px; 2 Py; 3 Parity; 4 C41; 5 C43; 6 Pxy; 7 Pyx;
-    std::complex<double> Measure::sym_phase(unsigned m, unsigned n, unsigned sym_index, unsigned hs){
+    std::complex<double> Measure::sym_phase(int m, int n, unsigned sym_index, unsigned hs){
         static int N = Nx * Ny; 
         static const double pi = 3.141592653589793 ;
         double theta;
-        int psl = get_pssign(PST_t[m], 0);
-        int psr = get_pssign(PST_t[n], 0);
+        //int psl = get_pssign(PST_t[m], 0);
+        //int psr = get_pssign(PST_t[n], 0);
+        int psl = m, psr= n;
         switch(sym_index){
             case 0 :
                 theta = 0;
@@ -439,7 +513,8 @@ class Measure
     {
         if(IfA == 1) write_sparse_mat("A.dat", irowA, icolA, valA);
         if(IfHt == 1) write_sparse_mat("Hteff.dat", irowHt, icolHt, valHt);
-        if(IfHJ == 1) write_sparse_mat("HJeff.dat", irowHJ, icolHJ, valHJ);        
+        if(IfHJ == 1) write_sparse_mat("HJeff.dat", irowHJ, icolHJ, valHJ); 
+        if(IfZi == 1) write_sparse_mat("Zi.dat", irowZi, icolZi, valZi);       
     }
 
     void Measure::write_sparse_mat(std::string filename, std::vector<int> &row, std::vector<int> &col, std::vector<std::complex<double>> &data)
