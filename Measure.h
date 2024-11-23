@@ -15,13 +15,13 @@ class Measure
 
     double t,J;
     int Nx,Ny;
-    int holespin,measuredim,sigmatj;//sigmatj=-1: sigma cdot t-J model
+    int holespin,holenum,sigmatj;//sigmatj=-1: sigma cdot t-J model
     std::vector<std::string> PST_t;
     int pssize;
     int Ifbasis,Ifsym;
-    int IfHt,IfHJ,IfA, IfZi;
-    std::vector<int> irowHt, icolHt, irowHJ, icolHJ, irowA, icolA , irowZi , icolZi;
-    std::vector<std::complex<double>> valHt,valHJ, valA, valZi;
+    int IfHt,IfHJ,IfA, IfZi, Ifnh;
+    //std::vector<int> irowHt, icolHt, irowHJ, icolHJ, irowA, icolA , irowZi , icolZi;
+    //std::vector<std::complex<double>> valHt,valHJ, valA, valZi;
     std::vector<double> theta_ij;
     std::vector<itensor::MPS> ctilde_array_psl;
     MPS phi0;
@@ -30,13 +30,15 @@ class Measure
 
     public:
     
-    Measure(double t_,double J_,int Nx_, int Ny_, int holespin_,int measuredim_,int sigmatj_,std::vector<std::string> PST_t_,int pssize_,int Ifbasis_,int Ifsym_,int IfHt_,int IfHJ_, int IfA_, int IfZi_)
-      : t(t_), J(J_),Nx(Nx_), Ny(Ny_), holespin(holespin_), measuredim(measuredim_),sigmatj(sigmatj_),PST_t(PST_t_),pssize(pssize_),
-      Ifbasis(Ifbasis_),Ifsym(Ifsym_),IfHt(IfHt_),IfHJ(IfHJ_),IfA(IfA_), IfZi(IfZi_)
+    Measure(double t_,double J_,int Nx_, int Ny_, int holespin_,int holenum_,int sigmatj_,std::vector<std::string> PST_t_,int pssize_,int Ifbasis_,int Ifsym_,int IfHt_,int IfHJ_, int IfA_, int IfZi_,int Ifnh_)
+      : t(t_), J(J_),Nx(Nx_), Ny(Ny_), holespin(holespin_), holenum(holenum_),sigmatj(sigmatj_),PST_t(PST_t_),pssize(pssize_),
+      Ifbasis(Ifbasis_),Ifsym(Ifsym_),IfHt(IfHt_),IfHJ(IfHJ_),IfA(IfA_), IfZi(IfZi_), Ifnh(Ifnh_)
         {  
             generate_theta();
+            generate_lattice();
             if(Ifbasis==1) load_basis();
             else generate_basis();
+
         }
 
     void generate_theta();
@@ -51,6 +53,8 @@ class Measure
 
     void load_basis();
 
+    void generate_lattice();
+
     void generalmeasure();
 
     void measureAred();
@@ -61,6 +65,8 @@ class Measure
 
     void measureZi();
 
+    void measurenh();
+
     unsigned sym_ope(unsigned h, unsigned sym_index);
 
     bool Isconj(unsigned sym_index);
@@ -69,7 +75,7 @@ class Measure
 
     void coutbasis();
 
-    void coutdata();
+    //void coutdata();
 
     void write_sparse_mat(std::string filename, std::vector<int> &row, std::vector<int> &col, std::vector<std::complex<double>> &data);
 
@@ -185,19 +191,55 @@ class Measure
         std::cout<<"success_load"<<std::endl;
     }
 
+    void Measure::generate_lattice()
+    {
+        int N = Nx * Ny;
+        std::vector<int> script;
+        script.resize(N);
+        std::vector<int> index;
+        index.resize(N);
+        for (int i=0; i< N; i++) script[i]= N;
+        int num = 0;
+        for (int i=0; i < N; i++)
+        {
+            int iy = i%Ny, ix = i/Ny;
+            script[i] = num;
+            index.push_back(i);
+            num++;
+        }
+        int N_h = num;
+        std::cout << "hdim = " << N_h << ";" << std::endl;
+        std::ofstream scriptfile;
+        scriptfile.open("script.dat");
+        for (auto & iter:script)
+            scriptfile << iter << "\n";
+        scriptfile << std::endl;
+        scriptfile.close();
+            
+        std::ofstream indexfile;
+        indexfile.open("index.dat");
+        for (auto & iter:index)
+            indexfile << iter << "\n";
+        indexfile << std::endl;
+        indexfile.close();
+    }
+
     void Measure::generalmeasure()
     {
         if(IfA == 1) measureAred();
         if(IfHt == 1) measureHt();
         if(IfHJ == 1) measureHJ();
-        if(IfZi == 1) measureZi(); 
+        if(IfZi == 1) measureZi();
+        if(Ifnh == 1) measurenh(); 
     }
 
     void Measure::measureAred()
     {
         auto N = Nx * Ny;
         int sym_num = (Nx == Ny)? (7):(3);
-        if (Ifsym==0) sym_num = 0 ;       
+        if (Ifsym==0) sym_num = 0 ;
+        std::vector<int>  irowA, icolA;
+        std::vector<std::complex<double>>  valA;      
         for (int psr = 0; psr < pssize; psr++){
             for (int psl = 0; psl < pssize; psl++){
 
@@ -234,9 +276,11 @@ class Measure
                             label_visited[S_j-1][S_i-1] = 1;
                         }
                     }
+                    std::cout<<"finishA"<<i<<std::endl;
                 }
             }
         }
+        write_sparse_mat("A.dat", irowA, icolA, valA);
     }
 
     void Measure::measureHt()
@@ -244,7 +288,9 @@ class Measure
         auto N = Nx * Ny;
         auto lattice = squareLattice(Nx,Ny);
         int sym_num = (Nx == Ny)? (7):(3);
-        if (Ifsym==0) sym_num = 0 ; 
+        if (Ifsym==0) sym_num = 0 ;
+        std::vector<int>  irowHt, icolHt;
+        std::vector<std::complex<double>>  valHt;  
         auto ampo = AutoMPO(sitesnew);    
         for(auto bnd : lattice)
         {
@@ -290,15 +336,19 @@ class Measure
                             label_visited[S_j-1][S_i-1] = 1;
                         }
                     }
+                    std::cout<<"finishHt"<<i<<std::endl;
                 }
             }
         }
+        write_sparse_mat("Hteff.dat", irowHt, icolHt, valHt);
     }
 
     void Measure::measureHJ()
     {
         auto N = Nx * Ny;
         int sym_num = (Nx == Ny)? (7):(3);
+        std::vector<int>  irowHJ, icolHJ;
+        std::vector<std::complex<double>>  valHJ;
         if (Ifsym==0) sym_num = 0 ;
         auto lattice = squareLattice(Nx,Ny);
         auto ampo = AutoMPO(sitesnew);        
@@ -346,16 +396,21 @@ class Measure
                             label_visited[S_j-1][S_i-1] = 1;
                         }
                     }
+                    std::cout<<"finishHJ"<<i<<std::endl;
                 }
             }
         }
+        write_sparse_mat("HJeff.dat", irowHJ, icolHJ, valHJ);
     }
 
     void Measure::measureZi()
     {
         auto N = Nx * Ny;
         int sym_num = (Nx == Ny)? (7):(3);
+        std::vector<int>  irowZi, icolZi;
+        std::vector<std::complex<double>>  valZi;
         if (Ifsym==0) sym_num = 0 ;
+        //sym_num = 0;
         std::vector<std::string> PST_Zi;
         PST_Zi.push_back("0");
         std::vector<itensor::MPS> barec_array;
@@ -378,15 +433,7 @@ class Measure
                     label_visited[i][j] = 0;
 
             for (int i = 1; i <= N; i++)
-            {
-                //site_i % 2 == 1
-                auto ampo = AutoMPO(sitesnew);
-                if (holespin == 0)
-                ampo += 1,"Cdagup", i; 
-                else
-                ampo += 1,"Cdagdn", i;
-                auto cdagger = toMPO(ampo);
-                
+            {   
                 for (int j = 1; j <= N; j++)
                 {   
                     if (label_visited[i-1][j-1]) continue;
@@ -403,9 +450,73 @@ class Measure
                         label_visited[S_i-1][S_j-1] = 1;                        
                     }
                 }
+                std::cout<<"finishZi"<<i<<std::endl;
             }
         } 
-        }  
+        }
+        write_sparse_mat("Zi.dat", irowZi, icolZi, valZi);  
+    }
+
+    void Measure::measurenh()
+    {
+        auto N = Nx * Ny;
+        int sym_num = (Nx == Ny)? (7):(3);
+        std::vector<int>  irownh, icolnh , inumhole;
+        std::vector<std::complex<double>>  valnh;
+        if (Ifsym==0) sym_num = 0 ;
+        //sym_num = 0;
+        for (int psl = 0; psl < pssize; psl++){
+        for (int psr = 0 ;psr < pssize; psr++){
+
+            std::vector<std::vector<std::vector<bool>>> label_visited(N,std::vector<std::vector<bool>>(N,std::vector<bool>(N)));
+            for (int j = 0; j < N;j++)
+                for(int i = 0; i < N; i++)
+                    for(int k = 0; k < N; k++)
+                        label_visited[i][j][k] = 0;
+            for (int h = 1 ;h <= N ;h++)
+            {
+                auto nhole_h = (-1)*op(sitesnew,"Ntot",h);
+                nhole_h += op(sitesnew,"Id",h);
+
+            for (int i = 1; i <= N; i++)
+            {
+                for (int j = i; j <= N; j++)
+                {   
+                    if ((label_visited[i-1][j-1][h-1])||(label_visited[j-1][i-1][h-1])) continue;
+                    MPS nhstate = ctilde_array_psl[(j-1)*pssize+psr];
+                    auto newstate = nhole_h * nhstate(h);
+                    newstate.noPrime();
+                    nhstate.set(h,newstate);
+                    std::complex<double> nhvalue = innerC(ctilde_array_psl[(i-1)*pssize+psl],nhstate);
+                    if(std::abs(nhvalue)<1e-15) nhvalue=0;    
+                    for (int sym_index = 0; sym_index < sym_num + 1; sym_index++){
+                        int S_i=sym_ope(i,sym_index),S_j=sym_ope(j,sym_index),S_h=sym_ope(h,sym_index);
+                        if ((label_visited[S_i-1][S_j-1][S_h-1])||(label_visited[S_j-1][S_i-1][S_h-1])) continue;
+                        int Iscon = Isconj(sym_index);
+                        std::complex<double> nhvaluesym =(Iscon)?(std::conj(nhvalue)):(nhvalue);
+                        nhvaluesym = nhvaluesym * sym_phase(get_pssign(PST_t[psl], 0), get_pssign(PST_t[psr], 0), sym_index, holespin);
+                        irownh.push_back(S_i * pssize + psl); icolnh.push_back(S_j * pssize + psr); inumhole.push_back(S_h);
+                        if(S_i == S_j) valnh.push_back(std::real(nhvaluesym));
+                        else
+                        {
+                            valnh.push_back(nhvaluesym);
+                            irownh.push_back(S_j * pssize + psr); icolnh.push_back(S_i * pssize + psl); inumhole.push_back(S_h);
+                            valnh.push_back(std::conj(nhvaluesym));
+                        }
+                        label_visited[S_i-1][S_j-1][S_h-1] = 1;label_visited[S_j-1][S_i-1][S_h-1] = 1;                       
+                    }
+                }
+            }
+            std::cout<<"finishnh"<<h<<std::endl;
+            }
+        } 
+        }
+        std::ofstream nhfile;
+        nhfile.open("nh.dat");
+        for (int i = 0; i< (int) irownh.size();i++)
+        nhfile << irownh[i]  << "\t" << icolnh[i]  << "\t" << inumhole[i]  << "\t" << valnh[i].real() << std::showpos << valnh[i].imag() << "i"<<std::endl;
+        nhfile << std::endl;
+        nhfile.close();  
     }
 
     //sym_index: 0 I; 1 Px; 2 Py; 3 Parity; 4 C41; 5 C43; 6 Pxy; 7 Pyx;  Px means two points are symmetric along y axis.
@@ -462,33 +573,34 @@ class Measure
         static int N = Nx * Ny; 
         static const double pi = 3.141592653589793 ;
         double theta;
-        //int psl = get_pssign(PST_t[m], 0);
-        //int psr = get_pssign(PST_t[n], 0);
         int psl = m, psr= n;
+        int dnspinnum;
+        if((hs==0)&&(holenum%2==1)) dnspinnum=(holenum+1)/2;
+        else dnspinnum=holenum/2;
         switch(sym_index){
             case 0 :
                 theta = 0;
                 break;
             case 1 :
-                theta = (psr - psl) * pi * (N / 2 - hs) ;
+                theta = (psr - psl) * pi * (N / 2 - hs -dnspinnum) ;
                 break;
             case 2 :
                 theta = 0;
                 break;
             case 3 :
-                theta = - (psr - psl) * pi * (N / 2 - hs) ;
+                theta = - (psr - psl) * pi * (N / 2 - hs -dnspinnum) ;
                 break;
             case 4 :
-                theta = (psr - psl) * pi / 2 * (N / 2 - hs) ;
+                theta = (psr - psl) * pi / 2 * (N / 2 - hs -dnspinnum) ;
                 break;
             case 5 :
-                theta = - (psr - psl) * pi / 2 * (N / 2 - hs) ;
+                theta = - (psr - psl) * pi / 2 * (N / 2 - hs -dnspinnum) ;
                 break;
             case 6 :
-                theta = (psr- psl) * (N / 2 - hs) * pi / 2 ;
+                theta = (psr- psl) * (N / 2 - hs -dnspinnum) * pi / 2 ;
                 break;
             case 7 :
-                theta = - (psr- psl) * (N / 2 - hs) * pi / 2 ;
+                theta = - (psr- psl) * (N / 2 - hs -dnspinnum) * pi / 2 ;
                 break;
             default :
                 theta = 0;
@@ -509,13 +621,14 @@ class Measure
         close(f);
     }
 
+    /*
     void Measure::coutdata()
     {
         if(IfA == 1) write_sparse_mat("A.dat", irowA, icolA, valA);
         if(IfHt == 1) write_sparse_mat("Hteff.dat", irowHt, icolHt, valHt);
         if(IfHJ == 1) write_sparse_mat("HJeff.dat", irowHJ, icolHJ, valHJ); 
         if(IfZi == 1) write_sparse_mat("Zi.dat", irowZi, icolZi, valZi);       
-    }
+    }*/
 
     void Measure::write_sparse_mat(std::string filename, std::vector<int> &row, std::vector<int> &col, std::vector<std::complex<double>> &data)
     {
