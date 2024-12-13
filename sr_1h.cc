@@ -138,6 +138,18 @@ main(int argc, char* argv[])
     std::cout<<innerC(psitest2,phi0test)<<std::endl;
     std::cout<<innerC(psitest1,phi0test)/innerC(psitest2,phi0test)<<std::endl; //exp(iLz*pi/2)
     
+    //to measure the hole density of the RVB state
+    for (int i = 1; i<= N ;i++)
+    {
+        auto phi0testnh = phi0test;
+        auto nhole_h=(-1)*op(sitesold, "Ntot",i);
+        nhole_h += op(sitesold,"Id",i);
+        auto newstate = nhole_h * phi0testnh(i);
+        newstate.noPrime();
+        phi0testnh.set(i,newstate);
+        std::cout<<i<<" "<<innerC(phi0test,phi0testnh)<<std::endl;
+    } 
+
 
     if(Ifmeasure!=0){
 
