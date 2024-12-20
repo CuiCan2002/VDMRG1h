@@ -2,4 +2,4 @@
 /basis/
 /data/
 *.o
-
+/mpi***/

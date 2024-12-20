@@ -6,11 +6,11 @@
 
   ntasks=32
   mpi=mpi
-  lx=6
-  ly=6
+  lx=4
+  ly=4
   hole=1h
   holeexist=2h
-  ifphi0=0
+  ifphi0=1
   dim=500
   if [ ${mpi} == mpi ]
   then

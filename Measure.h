@@ -130,6 +130,23 @@ class Measure
             newpsi.noPrime();
             psi.set(j,newpsi);
         }
+        
+        if(holespin==1)
+        {
+            for(int j = 1; j <= N; j++)
+            {
+            if(j==site_i) continue;
+            psi.position(j);
+            double theta = 0.0;
+            theta =  pssign * get_theta(j,site_i);
+            auto psop =std::complex<double>(1-std::cos(theta), (-1)*std::sin(theta))*op(sitesold,"Ntot",j);
+            psop += std::complex<double>(std::cos(theta), std::sin(theta))*op(sitesold,"Id",j);
+            auto newpsi = psop * psi(j);
+            newpsi.noPrime();
+            psi.set(j,newpsi);
+            }
+        }
+
         }
         psi = removeQNs(psi);
         psi.position(site_i);

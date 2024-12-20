@@ -1,22 +1,22 @@
 input
 {
-Nx = 6
-Ny = 6
+Nx = 4
+Ny = 4
 t  = 3.0
 J  = 1.0
 
-Ifphi0 = 1
-holenum = 3
+Ifphi0 = 0
+holenum = 2
 sweepnum = 30
 sweepmaxdim = 500
 sweepcutoff = 1E-16
 
 Ifbasis = 0
-Ifmeasure = 0
+Ifmeasure = 1
 holespin = 0
 measurenum = 500
 sigmatj = 1
-Phasestring = 1
+Phasestring = -1
 Ifsym = 0
 IfHt = 1
 IfHJ = 1
